@@ -1,0 +1,14 @@
+
+[Unit]
+Description=ansible-workshop
+After=network.target
+
+[Service]
+ExecStart=/bin/sh -c '/usr/bin/python3 /opt/ansible-workshop/pycon.py >> /opt/ansible-workshop/pycon.log 2>&1'
+Restart=on-abort
+WorkingDirectory=/opt/ansible-workshop/
+User=workshop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

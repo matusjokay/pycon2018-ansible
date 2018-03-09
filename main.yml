@@ -1,0 +1,196 @@
+  # kam sa pripajame
+- hosts: workshop
+
+  # mozeme definovat aj premenne
+  vars:
+     # cesta k aplikacii, ktoru budeme dev-opovat
+     app_path: /opt/ansible-workshop
+     app_http_port: 8090
+
+     # doplnime premenne pre nginx
+     nginx_http_port: 80
+     nginx_max_conns: 1024
+     nginx_client_max_body_size: 1M
+
+  # pod akym uzivatelom
+  remote_user: workshop
+
+  # definicia handlerov
+  handlers:
+    # identifikacia tasku v handleroch je 'name'
+    - name: restart nginx
+      become: yes
+      # v tasku pouzivame tiez moduly
+      service:
+        name: nginx
+        state: restarted
+
+    - name: daemon-reload
+      become: yes
+      systemd:
+        daemon_reload: yes
+
+    - name: restart ansible-workshop
+      become: yes
+      service:
+        name: ansible-workshop
+        state: restarted
+
+  # pred taskami
+  #pre_tasks:
+
+  # role: vykonanie celistvej a komplexnej podulohy
+  # konfig v samostatnom adresari... vnorenie ineho playbooku
+  #roles:
+
+  # tasky
+  tasks:
+      # volitelna polozka, pri vykonavani krokov sa zobrazi na monitor,
+      # co sa prave vykonava
+    - name: ensure all necessary packages are present
+      # become moze byt 'yes' alebo 'true'
+      become: yes
+      # ideme instalovat balicky
+      apt:
+        # ideme spravit loop... cez 'item'
+        name: '{{ item }}'
+        # chceme pritomne balicky, ak treba, sa aktualizuje na najnovsi
+        # POZOR: pre produkciu skor iba 'present', aby sa nerozbil system!
+        # POZOR: 'latest' skusat na testovacej masine!
+        state: latest
+        # aktualizovat cache balickov
+        update_cache: yes
+      # chceme tento taks vykonat pomocou itemov
+      with_items:
+        # definovanie, ake balicky sa maju nainstalovat
+        # vratane zavislosti
+        - apt-transport-https
+        - curl
+        - gnupg2
+        - python3
+        - python3-pip
+
+    # dalsi task, vytvorenie dir pre app
+    - name: ensure application directory is present
+      become: yes
+      # pouzijeme modul file: praca s fs, mame vstavane premenne k dispozicii...
+      file:
+        # premenna nemusi byt s medzerou, ale je to citatelnejsie...
+        path: '{{ app_path }}'
+        owner: workshop
+        group: workshop
+        mode: 0750
+        # vytvorime adresar, ale vieme aj ine...
+        # 'link' (potrebujeme 'source', 'destination'), 'file', 'directory'
+        state: directory
+
+    # task na stiahnutie app z gitu
+    - name: checkout app from git repo
+      # modul git...
+      git:
+        # skadial
+        repo: "https://github.com/Pytlicek/pyconsk-ansible-workshop.git"
+        # kam
+        dest: '{{ app_path }}'
+        clone: yes
+        # ak by sme sli cez ssh a nechceme potvrdzovat rucne pridanie kluca
+        accept_hostkey: yes
+
+    # update python balickov pre aplikaciu; balicky su definovane v subore
+    - name: ensure all pip packages are present
+      # modul pip
+      pip:
+        # v tomto cieli bude zoznam balickov pre instalaciu app
+        requirements: '{{ app_path }}/requirements.txt'
+        # tento atribut je sice default 'present', ale radsej sa uistime...
+        state: present
+        # vieme aj priamo povedat, ktory pip pouzijeme
+        executable: /usr/bin/pip3
+
+    # potrebujeme nainstalovat reverznu proxy nginx
+    # na verifikaciu balickov nginx 
+    - name: add apt signing key for nginx repo
+      become: yes
+      # modul pre spravu klucov apt
+      apt_key:
+        url: "https://nginx.org/keys/nginx_signing.key"
+        state: present
+      # podmienene vykonany prikaz!
+      when:
+        # iba ak je cielova distro ubuntu
+        - ansible_distribution == "Ubuntu"
+
+    # existencia repozitara nginx
+    - name: ensure nginx repo is present
+      become: yes
+      # modul na spravu repozitara
+      apt_repository:
+        # odkial
+        repo: 'deb https://nginx.org/packages/mainline/ubuntu/ {{ ansible_distribution_release }} nginx'
+        state: present
+        # v ktorom subore bude repozitar
+        filename: 'nginx'
+        # update kesky
+        update_cache: yes
+      # medzi riadkami je logicky 'and' pri podmienkach!
+      when:
+        - ansible_distribution == "Ubuntu"
+        # skratene vyhodnocovanie! ked pouzivame premenne, pouuziva sa skratene vyhodnocovanie
+        #- var_is_true
+
+    # instalacia nginx
+    - name: ensure ngx pkg is present
+      become: yes
+      apt:
+        name: nginx
+        state: latest
+
+    # ak jestvuje na masine nginx, chceme ho restartnut...
+    - name: ensure nginx is running and enabled on boot
+      become: yes
+      # module na pracu so sluzbami
+      service:
+        name: nginx
+        # chceme, aby bezala nastartovana
+        state: started
+        # chceme, aby sa po kadom starte spustala
+        enabled: yes
+
+    # vytvorime system service pre nasu flask app
+    - name: create flask service from template
+      become: yes
+      # modul pre pracu s template
+      template:
+        src: ansible-workshop.service
+        dest: "/etc/systemd/system/ansible-workshop.service"
+        owner: root
+        group: root
+        # zaloha pre istotu
+        backup: yes
+
+      # po zmene sluzby chceme restartnut sluzbu, na to sa pouzivaju handlery
+      # handler moze byt aj v tomto konfiguraku, nielen v samostatnom subore, vid hore
+      # jeden na systemd, druhy na restartovanie aplikacie
+      # takze notifikujeme callbaky
+      notify:
+        - daemon-reload
+        - restart ansible-workshop
+
+    # task pre restart nginx
+    - name: create nginx config from template
+      become: yes
+      template:
+        src: nginx.conf.j2
+        dest: "/etc/nginx/nginx.conf"
+        owner: root
+        group: nginx
+        mode: 0640
+        backup: yes
+        # validacia pred spustenim
+        validate: "/usr/sbin/nginx -c %s -t"
+      notify:
+        - restart nginx
+
+
+  # po taskoch
+  post_tasks:

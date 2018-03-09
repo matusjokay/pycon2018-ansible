@@ -1,0 +1,56 @@
+sudo apt-get update
+sudo apt-get install python3 pyton3-pip
+
+export LC_ALL=C
+sudo pip3 install ansible -U
+sudo mkdir -p /etc/ansible
+
+sudo echo '[workshop]' >> /etc/ansible/hosts
+sudo echo 'ansible-workshop ansible_host=127.0.0.1 ansible_python_interpreter=/usr/bin/python3' >> /etc/ansible/hosts
+
+"""
+ansible sa prihlasuje na masinku
+na linux cez ssh
+takze si ju pridame, pracujeme localhost...
+"""
+cat ~/.ssh/id_rsa.pub >> ~/authorized.keys
+
+overime: 
+1) ssh local_user@localhost
+2) ansible localhost -m ping -c ssh
+   ansible ansible-workshop -m ping -c ssh
+   ansible all -m ping
+
+vytvorime adresar na konfigurak = tzv. playbook
+mkdir -p ansible-workshop
+cd ansible-workshop
+
+'-m je modul, -a atribut'
+ansible all -m apt -a "name=vim state=present"
+
+pomocou playbooku chceme dosiahnut ciele,
+moduly sa snazia konecny stav docielit
+
+'--become' -- ako root na cielovom stroji, sudo! nesmie vyzadovat heslo
+'state=present' -- nainstalovat
+'state=absent' -- odinstalovat
+'state=latest' -- aktualizuje, ak treba
+ansible all -m apt -a "name=vim state=absent" --become
+
+
+vytvorime konfigurak - playlist pre masinu
+spustenie playbooku: ansible-plybook main.yml
+
+overenie:
+  nginx -v
+  ss -tunlp
+  curl -I http://127.0.0.1
+  curl -I http://host.name
+
+ulozime si service pre nasu flask app: ansible-workshop.service
+ulozime si sablona pre nginx: nginx.conf.j2
+
+potrebujeme doplnit tasky, ktore nam sluzbu nakopiruju na spravne miesto
+a restartuju sluzby...
+otestujeme
+
